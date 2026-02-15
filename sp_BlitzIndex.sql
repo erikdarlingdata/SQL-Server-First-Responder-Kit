@@ -1136,7 +1136,7 @@ BEGIN CATCH
 RAISERROR (N'Checking partition counts to exclude databases with over 100 partitions',0,1) WITH NOWAIT;
 IF @BringThePain = 0 AND @SkipPartitions = 0 AND @TableName IS NULL
     BEGIN   
-        DECLARE partition_cursor CURSOR FOR
+        DECLARE partition_cursor CURSOR LOCAL FAST_FORWARD FOR
         SELECT dl.DatabaseName
         FROM #DatabaseList dl
         LEFT OUTER JOIN #Ignore_Databases i ON dl.DatabaseName = i.DatabaseName
@@ -1466,16 +1466,16 @@ BEGIN TRY
         RAISERROR (N'Inserting data into #IndexColumns for nonclustered indexes',0,1) WITH NOWAIT;
         IF @Debug = 1
             BEGIN
-                PRINT SUBSTRING(@dsql, 0, 4000);
-                PRINT SUBSTRING(@dsql, 4000, 8000);
-                PRINT SUBSTRING(@dsql, 8000, 12000);
-                PRINT SUBSTRING(@dsql, 12000, 16000);
-                PRINT SUBSTRING(@dsql, 16000, 20000);
-                PRINT SUBSTRING(@dsql, 20000, 24000);
-                PRINT SUBSTRING(@dsql, 24000, 28000);
-                PRINT SUBSTRING(@dsql, 28000, 32000);
-                PRINT SUBSTRING(@dsql, 32000, 36000);
-                PRINT SUBSTRING(@dsql, 36000, 40000);
+                PRINT SUBSTRING(@dsql,     1, 4000);
+                PRINT SUBSTRING(@dsql,  4001, 4000);
+                PRINT SUBSTRING(@dsql,  8001, 4000);
+                PRINT SUBSTRING(@dsql, 12001, 4000);
+                PRINT SUBSTRING(@dsql, 16001, 4000);
+                PRINT SUBSTRING(@dsql, 20001, 4000);
+                PRINT SUBSTRING(@dsql, 24001, 4000);
+                PRINT SUBSTRING(@dsql, 28001, 4000);
+                PRINT SUBSTRING(@dsql, 32001, 4000);
+                PRINT SUBSTRING(@dsql, 36001, 4000);
             END;
         INSERT    #IndexColumns ( database_id, [schema_name], [object_id], index_id, key_ordinal, is_included_column, is_descending_key, partition_ordinal,
             column_name, system_type_name, max_length, precision, scale, collation_name, is_nullable, is_identity, is_computed,
@@ -1550,16 +1550,16 @@ BEGIN TRY
         RAISERROR (N'Inserting data into #IndexSanity',0,1) WITH NOWAIT;
         IF @Debug = 1
             BEGIN
-                PRINT SUBSTRING(@dsql, 0, 4000);
-                PRINT SUBSTRING(@dsql, 4000, 8000);
-                PRINT SUBSTRING(@dsql, 8000, 12000);
-                PRINT SUBSTRING(@dsql, 12000, 16000);
-                PRINT SUBSTRING(@dsql, 16000, 20000);
-                PRINT SUBSTRING(@dsql, 20000, 24000);
-                PRINT SUBSTRING(@dsql, 24000, 28000);
-                PRINT SUBSTRING(@dsql, 28000, 32000);
-                PRINT SUBSTRING(@dsql, 32000, 36000);
-                PRINT SUBSTRING(@dsql, 36000, 40000);
+                PRINT SUBSTRING(@dsql,     1, 4000);
+                PRINT SUBSTRING(@dsql,  4001, 4000);
+                PRINT SUBSTRING(@dsql,  8001, 4000);
+                PRINT SUBSTRING(@dsql, 12001, 4000);
+                PRINT SUBSTRING(@dsql, 16001, 4000);
+                PRINT SUBSTRING(@dsql, 20001, 4000);
+                PRINT SUBSTRING(@dsql, 24001, 4000);
+                PRINT SUBSTRING(@dsql, 28001, 4000);
+                PRINT SUBSTRING(@dsql, 32001, 4000);
+                PRINT SUBSTRING(@dsql, 36001, 4000);
             END;
         INSERT    #IndexSanity ( [database_id], [object_id], [index_id], [index_type], [database_name], [schema_name], [object_name],
                                 index_name, is_indexed_view, is_unique, is_primary_key, is_unique_constraint, is_XML, is_spatial, is_NC_columnstore, is_CX_columnstore, is_json, is_in_memory_oltp,
@@ -1656,7 +1656,16 @@ BEGIN TRY
 				, page_io_latch_wait_count bigint
 				, page_io_latch_wait_in_ms bigint
 				)
-  
+
+			-- get columnstore dictionary sizes in the correct database context
+			IF OBJECT_ID('tempdb..#column_store_dict_sizes') IS NOT NULL
+				DROP TABLE #column_store_dict_sizes;
+			CREATE TABLE #column_store_dict_sizes
+			(
+				partition_id BIGINT NOT NULL,
+				dict_size_MB NUMERIC(29,2) NOT NULL
+			);
+
             SET @dsql = N'
                         DECLARE @d VARCHAR(19) = CONVERT(VARCHAR(19), GETDATE(), 121)
                         RAISERROR (N''start getting data into #dm_db_partition_stats_etc at %s'',0,1, @d) WITH NOWAIT;
@@ -1868,18 +1877,31 @@ BEGIN TRY
         RAISERROR (N'Inserting data into #IndexPartitionSanity',0,1) WITH NOWAIT;
         IF @Debug = 1
             BEGIN
-                PRINT SUBSTRING(@dsql, 0, 4000);
-                PRINT SUBSTRING(@dsql, 4000, 8000);
-                PRINT SUBSTRING(@dsql, 8000, 12000);
-                PRINT SUBSTRING(@dsql, 12000, 16000);
-                PRINT SUBSTRING(@dsql, 16000, 20000);
-                PRINT SUBSTRING(@dsql, 20000, 24000);
-                PRINT SUBSTRING(@dsql, 24000, 28000);
-                PRINT SUBSTRING(@dsql, 28000, 32000);
-                PRINT SUBSTRING(@dsql, 32000, 36000);
-                PRINT SUBSTRING(@dsql, 36000, 40000);
+                PRINT SUBSTRING(@dsql,     1, 4000);
+                PRINT SUBSTRING(@dsql,  4001, 4000);
+                PRINT SUBSTRING(@dsql,  8001, 4000);
+                PRINT SUBSTRING(@dsql, 12001, 4000);
+                PRINT SUBSTRING(@dsql, 16001, 4000);
+                PRINT SUBSTRING(@dsql, 20001, 4000);
+                PRINT SUBSTRING(@dsql, 24001, 4000);
+                PRINT SUBSTRING(@dsql, 28001, 4000);
+                PRINT SUBSTRING(@dsql, 32001, 4000);
+                PRINT SUBSTRING(@dsql, 36001, 4000);
             END;
-        EXEC sp_executesql @dsql; 
+        EXEC sp_executesql @dsql;
+
+        /* Populate columnstore dictionary sizes in the correct database context */
+        IF EXISTS (SELECT * FROM sys.all_objects WHERE name = 'column_store_dictionaries')
+        BEGIN
+            SET @dsql = N'SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+                INSERT INTO #column_store_dict_sizes (partition_id, dict_size_MB)
+                SELECT dict.partition_id, SUM(dict.on_disk_size / 1024.0 / 1024)
+                FROM ' + QUOTENAME(@DatabaseName) + N'.sys.column_store_dictionaries dict
+                GROUP BY dict.partition_id
+                OPTION (RECOMPILE);';
+            EXEC sp_executesql @dsql;
+        END;
+
         INSERT    #IndexPartitionSanity ( [database_id],
                                           [object_id], 
 										  [schema_name],
@@ -1937,10 +1959,12 @@ BEGIN TRY
 								SUM(os.page_latch_wait_in_ms),
 								SUM(os.page_io_latch_wait_count),								
 								SUM(os.page_io_latch_wait_in_ms)
-                                ,COALESCE((SELECT SUM (dict.on_disk_size / 1024.0 / 1024) FROM sys.column_store_dictionaries dict WHERE dict.partition_id = h.partition_id),0) AS reserved_dictionary_MB 
+                                ,COALESCE(MAX(csd.dict_size_MB), 0) AS reserved_dictionary_MB
                     from #dm_db_partition_stats_etc h
                     left JOIN #dm_db_index_operational_stats as os ON
-                        h.object_id=os.object_id and h.index_id=os.index_id and h.partition_number=os.partition_number 
+                        h.object_id=os.object_id and h.index_id=os.index_id and h.partition_number=os.partition_number
+                    LEFT JOIN #column_store_dict_sizes AS csd ON
+                        csd.partition_id = h.partition_id
                     group by h.database_id, h.object_id, h.sname, h.index_id, h.partition_number, h.partition_id, h.row_count, h.reserved_MB, h.reserved_LOB_MB, h.reserved_row_overflow_MB, h.lock_escalation_desc, h.data_compression_desc                          
                 
 		END; --End Check For @SkipPartitions = 0
@@ -2204,16 +2228,16 @@ OPTION (RECOMPILE);';
             RAISERROR('@dsql is null',16,1);
         IF @Debug = 1
             BEGIN
-                PRINT SUBSTRING(@dsql, 0, 4000);
-                PRINT SUBSTRING(@dsql, 4000, 8000);
-                PRINT SUBSTRING(@dsql, 8000, 12000);
-                PRINT SUBSTRING(@dsql, 12000, 16000);
-                PRINT SUBSTRING(@dsql, 16000, 20000);
-                PRINT SUBSTRING(@dsql, 20000, 24000);
-                PRINT SUBSTRING(@dsql, 24000, 28000);
-                PRINT SUBSTRING(@dsql, 28000, 32000);
-                PRINT SUBSTRING(@dsql, 32000, 36000);
-                PRINT SUBSTRING(@dsql, 36000, 40000);
+                PRINT SUBSTRING(@dsql,     1, 4000);
+                PRINT SUBSTRING(@dsql,  4001, 4000);
+                PRINT SUBSTRING(@dsql,  8001, 4000);
+                PRINT SUBSTRING(@dsql, 12001, 4000);
+                PRINT SUBSTRING(@dsql, 16001, 4000);
+                PRINT SUBSTRING(@dsql, 20001, 4000);
+                PRINT SUBSTRING(@dsql, 24001, 4000);
+                PRINT SUBSTRING(@dsql, 28001, 4000);
+                PRINT SUBSTRING(@dsql, 32001, 4000);
+                PRINT SUBSTRING(@dsql, 36001, 4000);
             END;
         INSERT    #MissingIndexes ( [database_id], [object_id], [database_name], [schema_name], [table_name], [statement], avg_total_user_cost, 
                                     avg_user_impact, user_seeks, user_scans, unique_compiles, equality_columns, 
@@ -2272,16 +2296,16 @@ OPTION (RECOMPILE);';
         RAISERROR (N'Inserting data into #ForeignKeys',0,1) WITH NOWAIT;
         IF @Debug = 1
             BEGIN
-                PRINT SUBSTRING(@dsql, 0, 4000);
-                PRINT SUBSTRING(@dsql, 4000, 8000);
-                PRINT SUBSTRING(@dsql, 8000, 12000);
-                PRINT SUBSTRING(@dsql, 12000, 16000);
-                PRINT SUBSTRING(@dsql, 16000, 20000);
-                PRINT SUBSTRING(@dsql, 20000, 24000);
-                PRINT SUBSTRING(@dsql, 24000, 28000);
-                PRINT SUBSTRING(@dsql, 28000, 32000);
-                PRINT SUBSTRING(@dsql, 32000, 36000);
-                PRINT SUBSTRING(@dsql, 36000, 40000);
+                PRINT SUBSTRING(@dsql,     1, 4000);
+                PRINT SUBSTRING(@dsql,  4001, 4000);
+                PRINT SUBSTRING(@dsql,  8001, 4000);
+                PRINT SUBSTRING(@dsql, 12001, 4000);
+                PRINT SUBSTRING(@dsql, 16001, 4000);
+                PRINT SUBSTRING(@dsql, 20001, 4000);
+                PRINT SUBSTRING(@dsql, 24001, 4000);
+                PRINT SUBSTRING(@dsql, 28001, 4000);
+                PRINT SUBSTRING(@dsql, 32001, 4000);
+                PRINT SUBSTRING(@dsql, 36001, 4000);
             END;
         INSERT  #ForeignKeys ( [database_id], [database_name], [schema_name], foreign_key_name, parent_object_id,parent_object_name, referenced_object_id, referenced_object_name,
                                 is_disabled, is_not_trusted, is_not_for_replication, parent_fk_columns, referenced_fk_columns,
@@ -2331,16 +2355,16 @@ OPTION (RECOMPILE);';
         RAISERROR (N'Inserting data into #UnindexedForeignKeys',0,1) WITH NOWAIT;
         IF @Debug = 1
             BEGIN
-                PRINT SUBSTRING(@dsql, 0, 4000);
-                PRINT SUBSTRING(@dsql, 4000, 8000);
-                PRINT SUBSTRING(@dsql, 8000, 12000);
-                PRINT SUBSTRING(@dsql, 12000, 16000);
-                PRINT SUBSTRING(@dsql, 16000, 20000);
-                PRINT SUBSTRING(@dsql, 20000, 24000);
-                PRINT SUBSTRING(@dsql, 24000, 28000);
-                PRINT SUBSTRING(@dsql, 28000, 32000);
-                PRINT SUBSTRING(@dsql, 32000, 36000);
-                PRINT SUBSTRING(@dsql, 36000, 40000);
+                PRINT SUBSTRING(@dsql,     1, 4000);
+                PRINT SUBSTRING(@dsql,  4001, 4000);
+                PRINT SUBSTRING(@dsql,  8001, 4000);
+                PRINT SUBSTRING(@dsql, 12001, 4000);
+                PRINT SUBSTRING(@dsql, 16001, 4000);
+                PRINT SUBSTRING(@dsql, 20001, 4000);
+                PRINT SUBSTRING(@dsql, 24001, 4000);
+                PRINT SUBSTRING(@dsql, 28001, 4000);
+                PRINT SUBSTRING(@dsql, 32001, 4000);
+                PRINT SUBSTRING(@dsql, 36001, 4000);
             END;
 
         INSERT
@@ -2449,16 +2473,16 @@ OPTION (RECOMPILE);';
 			RAISERROR (N'Inserting data into #Statistics',0,1) WITH NOWAIT;
             IF @Debug = 1
                 BEGIN
-                    PRINT SUBSTRING(@dsql, 0, 4000);
-                    PRINT SUBSTRING(@dsql, 4000, 8000);
-                    PRINT SUBSTRING(@dsql, 8000, 12000);
-                    PRINT SUBSTRING(@dsql, 12000, 16000);
-                    PRINT SUBSTRING(@dsql, 16000, 20000);
-                    PRINT SUBSTRING(@dsql, 20000, 24000);
-                    PRINT SUBSTRING(@dsql, 24000, 28000);
-                    PRINT SUBSTRING(@dsql, 28000, 32000);
-                    PRINT SUBSTRING(@dsql, 32000, 36000);
-                    PRINT SUBSTRING(@dsql, 36000, 40000);
+                    PRINT SUBSTRING(@dsql,     1, 4000);
+                    PRINT SUBSTRING(@dsql,  4001, 4000);
+                    PRINT SUBSTRING(@dsql,  8001, 4000);
+                    PRINT SUBSTRING(@dsql, 12001, 4000);
+                    PRINT SUBSTRING(@dsql, 16001, 4000);
+                    PRINT SUBSTRING(@dsql, 20001, 4000);
+                    PRINT SUBSTRING(@dsql, 24001, 4000);
+                    PRINT SUBSTRING(@dsql, 28001, 4000);
+                    PRINT SUBSTRING(@dsql, 32001, 4000);
+                    PRINT SUBSTRING(@dsql, 36001, 4000);
                 END;
 			
 			EXEC sp_executesql @dsql, @params = N'@i_DatabaseName NVARCHAR(128)', @i_DatabaseName = @DatabaseName;
@@ -2539,16 +2563,16 @@ OPTION (RECOMPILE);';
 			RAISERROR (N'Inserting data into #Statistics',0,1) WITH NOWAIT;
             IF @Debug = 1
                 BEGIN
-                    PRINT SUBSTRING(@dsql, 0, 4000);
-                    PRINT SUBSTRING(@dsql, 4000, 8000);
-                    PRINT SUBSTRING(@dsql, 8000, 12000);
-                    PRINT SUBSTRING(@dsql, 12000, 16000);
-                    PRINT SUBSTRING(@dsql, 16000, 20000);
-                    PRINT SUBSTRING(@dsql, 20000, 24000);
-                    PRINT SUBSTRING(@dsql, 24000, 28000);
-                    PRINT SUBSTRING(@dsql, 28000, 32000);
-                    PRINT SUBSTRING(@dsql, 32000, 36000);
-                    PRINT SUBSTRING(@dsql, 36000, 40000);
+                    PRINT SUBSTRING(@dsql,     1, 4000);
+                    PRINT SUBSTRING(@dsql,  4001, 4000);
+                    PRINT SUBSTRING(@dsql,  8001, 4000);
+                    PRINT SUBSTRING(@dsql, 12001, 4000);
+                    PRINT SUBSTRING(@dsql, 16001, 4000);
+                    PRINT SUBSTRING(@dsql, 20001, 4000);
+                    PRINT SUBSTRING(@dsql, 24001, 4000);
+                    PRINT SUBSTRING(@dsql, 28001, 4000);
+                    PRINT SUBSTRING(@dsql, 32001, 4000);
+                    PRINT SUBSTRING(@dsql, 36001, 4000);
                 END;
 			
 			EXEC sp_executesql @dsql, @params = N'@i_DatabaseName NVARCHAR(128)', @i_DatabaseName = @DatabaseName;
@@ -2931,10 +2955,10 @@ UPDATE    #IndexSanity
 SET        count_included_columns = D4.count_included_columns,
         count_key_columns = D4.count_key_columns
 FROM    #IndexSanity si
-        CROSS APPLY ( SELECT  SUM(CASE WHEN is_included_column = 'true' THEN 1
+        CROSS APPLY ( SELECT  SUM(CASE WHEN is_included_column = 1 THEN 1
                                             ELSE 0
                                     END) AS count_included_columns,
-                                SUM(CASE WHEN is_included_column = 'false' AND c.key_ordinal > 0 THEN 1
+                                SUM(CASE WHEN is_included_column = 0 AND c.key_ordinal > 0 THEN 1
                                             ELSE 0
                                     END) AS count_key_columns
                         FROM        #IndexColumns c
@@ -3506,16 +3530,16 @@ BEGIN
 
 		IF @Debug = 1
 			BEGIN
-				PRINT SUBSTRING(@dsql, 0, 4000);
-				PRINT SUBSTRING(@dsql, 4000, 8000);
-				PRINT SUBSTRING(@dsql, 8000, 12000);
-				PRINT SUBSTRING(@dsql, 12000, 16000);
-				PRINT SUBSTRING(@dsql, 16000, 20000);
-				PRINT SUBSTRING(@dsql, 20000, 24000);
-				PRINT SUBSTRING(@dsql, 24000, 28000);
-				PRINT SUBSTRING(@dsql, 28000, 32000);
-				PRINT SUBSTRING(@dsql, 32000, 36000);
-				PRINT SUBSTRING(@dsql, 36000, 40000);
+				PRINT SUBSTRING(@dsql,     1, 4000);
+				PRINT SUBSTRING(@dsql,  4001, 4000);
+				PRINT SUBSTRING(@dsql,  8001, 4000);
+				PRINT SUBSTRING(@dsql, 12001, 4000);
+				PRINT SUBSTRING(@dsql, 16001, 4000);
+				PRINT SUBSTRING(@dsql, 20001, 4000);
+				PRINT SUBSTRING(@dsql, 24001, 4000);
+				PRINT SUBSTRING(@dsql, 28001, 4000);
+				PRINT SUBSTRING(@dsql, 32001, 4000);
+				PRINT SUBSTRING(@dsql, 36001, 4000);
 			END;
 
         EXEC sp_executesql @dsql, N'@ObjectID INT, @ColumnList NVARCHAR(MAX) OUTPUT, @ColumnListWithApostrophes NVARCHAR(MAX) OUTPUT, @PartitionCount INT OUTPUT', @ObjectID, @ColumnList OUTPUT, @ColumnListWithApostrophes OUTPUT, @PartitionCount OUTPUT;
@@ -3588,16 +3612,16 @@ BEGIN
  
 			IF @Debug = 1
 				BEGIN
-					PRINT SUBSTRING(@dsql, 0, 4000);
-					PRINT SUBSTRING(@dsql, 4000, 8000);
-					PRINT SUBSTRING(@dsql, 8000, 12000);
-					PRINT SUBSTRING(@dsql, 12000, 16000);
-					PRINT SUBSTRING(@dsql, 16000, 20000);
-					PRINT SUBSTRING(@dsql, 20000, 24000);
-					PRINT SUBSTRING(@dsql, 24000, 28000);
-					PRINT SUBSTRING(@dsql, 28000, 32000);
-					PRINT SUBSTRING(@dsql, 32000, 36000);
-					PRINT SUBSTRING(@dsql, 36000, 40000);
+					PRINT SUBSTRING(@dsql,     1, 4000);
+					PRINT SUBSTRING(@dsql,  4001, 4000);
+					PRINT SUBSTRING(@dsql,  8001, 4000);
+					PRINT SUBSTRING(@dsql, 12001, 4000);
+					PRINT SUBSTRING(@dsql, 16001, 4000);
+					PRINT SUBSTRING(@dsql, 20001, 4000);
+					PRINT SUBSTRING(@dsql, 24001, 4000);
+					PRINT SUBSTRING(@dsql, 28001, 4000);
+					PRINT SUBSTRING(@dsql, 32001, 4000);
+					PRINT SUBSTRING(@dsql, 36001, 4000);
 				END;
 
 			IF @dsql IS NULL 
@@ -5095,8 +5119,9 @@ BEGIN
                                 NULL AS index_sanity_id, 
                                 250 AS Priority,
                                 N'Omitted Index Features' AS findings_group,
+                                N'No Indexes Use Includes' AS finding,
 								database_name AS [Database Name],
-                                N'No Indexes Use Includes' AS finding, 'https://www.brentozar.com/go/IndexFeatures' AS URL,
+                                'https://www.brentozar.com/go/IndexFeatures' AS URL,
                                 N'No Indexes Use Includes' AS details,
                                 database_name + N' (Entire database)' AS index_definition, 
                                 N'' AS secret_columns, 
@@ -5547,10 +5572,10 @@ BEGIN
             OR [update_referential_action_desc] <> N'NO_ACTION')
 			OPTION    ( RECOMPILE );
 
-            RAISERROR(N'check_id 72: Unindexed foreign keys.', 0,1) WITH NOWAIT;
+            RAISERROR(N'check_id 75: Unindexed foreign keys.', 0,1) WITH NOWAIT;
                 INSERT    #BlitzIndexResults ( check_id, index_sanity_id, Priority, findings_group, finding, [database_name], URL, details, index_definition,
                                                secret_columns, index_usage_summary, index_size_summary, more_info )
-            SELECT  72 AS check_id, 
+            SELECT  75 AS check_id,
                     NULL AS index_sanity_id,
                     150 AS Priority,
                     N'Abnormal Design Pattern' AS findings_group,
@@ -6316,7 +6341,7 @@ BEGIN
 				ON i.index_sanity_id=sz.index_sanity_id
 			GROUP BY DB_NAME(i.database_id)	 
 			UNION ALL
-			SELECT  CASE WHEN @GetAllDatabases = 1 THEN N'All Databases' ELSE N'Database ' + N' as of ' + CONVERT(NVARCHAR(16),GETDATE(),121) END,        
+			SELECT  CASE WHEN @GetAllDatabases = 1 THEN N'All Databases' ELSE N'Database ' + QUOTENAME(@DatabaseName) + N' as of ' + CONVERT(NVARCHAR(16),GETDATE(),121) END,        
 					@ScriptVersionName,   
 					N'From Your Community Volunteers' ,   
 					N'http://FirstResponderKit.org' ,
