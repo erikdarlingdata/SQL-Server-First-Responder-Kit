@@ -115,7 +115,6 @@ RAISERROR('Setting up configuration variables',10,1) WITH NOWAIT;
 DECLARE @StringToExecute NVARCHAR(MAX),
     @ParmDefinitions NVARCHAR(4000),
     @Parm1 NVARCHAR(4000),
-    @OurSessionID INT,
     @LineFeed NVARCHAR(10),
     @StockWarningHeader NVARCHAR(MAX) = N'',
     @StockWarningFooter NVARCHAR(MAX) = N'',
@@ -177,7 +176,6 @@ SELECT
     /* @OutputTableNameBlitzCache = QUOTENAME(@OutputTableNameBlitzCache),  We purposely don't sanitize this because sp_BlitzCache will */
     /* @OutputTableNameBlitzWho = QUOTENAME(@OutputTableNameBlitzWho),  We purposely don't sanitize this because sp_BlitzWho will */
     @LineFeed = CHAR(13) + CHAR(10),
-    @OurSessionID = @@SPID,
     @OutputType                     = UPPER(@OutputType);
 
 IF(@OutputType = 'NONE' AND (@OutputTableName IS NULL OR @OutputSchemaName IS NULL OR @OutputDatabaseName IS NULL))
@@ -1793,7 +1791,7 @@ BEGIN
 		END
 
         IF EXISTS (SELECT * FROM sys.dm_exec_requests WHERE total_elapsed_time > 5000 AND request_id > 0)
-           
+        BEGIN
             IF OBJECT_ID('tempdb..#BlitzFirstTmpSession', 'U') IS NOT NULL
 				DROP TABLE #BlitzFirstTmpSession;
 
@@ -1805,7 +1803,7 @@ BEGIN
             AND     request_status = N'GRANT'
             AND     request_owner_type = N'SHARED_TRANSACTION_WORKSPACE';
 
-           
+
             INSERT INTO #BlitzFirstResults (CheckID, Priority, FindingsGroup, Finding, URL, Details, HowToStopIt, StartTime, LoginName, NTUserName, ProgramName, HostName, DatabaseID, DatabaseName, QueryText, OpenTransactionCount)
             SELECT 8 AS CheckID,
                 50 AS Priority,
@@ -1831,6 +1829,7 @@ BEGIN
             AND s.last_batch < DATEADD(ss, -10, SYSDATETIME())
             AND EXISTS(SELECT * FROM sys.dm_tran_locks WHERE request_session_id = s.spid
             AND NOT (resource_type = N'DATABASE' AND request_mode = N'S' AND request_status = N'GRANT' AND request_owner_type = N'SHARED_TRANSACTION_WORKSPACE'));
+        END
 	END
 
     /*Query Problems - Clients using implicit transactions - CheckID 37 */
@@ -3563,18 +3562,18 @@ If one of them is a lead blocker, consider killing that query.'' AS HowToStopit,
 	END
 
     INSERT INTO #BlitzFirstResults (CheckID, Priority, FindingsGroup, Finding, URL, Details, HowToStopIt)
-    SELECT 32 AS CheckID,
+    SELECT 33 AS CheckID,
         100 AS Priority,
         'Query Problems' AS FindingGroup,
         'Suboptimal Plans/Sec High' AS Finding,
         'https://www.brentozar.com/go/suboptimal/' AS URL,
-        CAST(ps.value_delta AS NVARCHAR(50)) + ' plans reported in the ' + CAST(ps.instance_name AS NVARCHAR(100)) + ' workload group (from Workload GroupStats:Suboptimal plans/sec counter)'  + @LineFeed 
+        CAST(ps.value_delta AS NVARCHAR(50)) + ' plans reported in the ' + CAST(ps.instance_name AS NVARCHAR(100)) + ' workload group (from Workload Group Stats:Suboptimal plans/sec counter)'  + @LineFeed
             + 'Even if you are not using Resource Governor, it still tracks information about user queries, memory grants, etc.' AS Details,
         'Check out sp_BlitzCache to get more information about recent queries, or try sp_BlitzWho to see currently running queries.' AS HowToStopIt
     FROM #PerfmonStats ps
-        INNER JOIN #PerfmonStats psComp ON psComp.Pass = 2 AND psComp.object_name = @ServiceName + ':Workload GroupStats' AND psComp.counter_name = 'Suboptimal plans/sec' AND psComp.value_delta > 100
+        INNER JOIN #PerfmonStats psComp ON psComp.Pass = 2 AND psComp.object_name = @ServiceName + ':Workload Group Stats' AND psComp.counter_name = 'Suboptimal plans/sec' AND psComp.value_delta > 100
     WHERE ps.Pass = 2
-        AND ps.object_name = @ServiceName + ':Workload GroupStats' 
+        AND ps.object_name = @ServiceName + ':Workload Group Stats'
         AND ps.counter_name = 'Suboptimal plans/sec'
         AND ps.value_delta > (10 * @Seconds); /* Ignore servers sitting idle */
 
@@ -3731,8 +3730,8 @@ If one of them is a lead blocker, consider killing that query.'' AS HowToStopit,
         'Server Info' AS FindingGroup,
         'Batch Requests per Sec' AS Finding,
         'https://www.brentozar.com/go/measure' AS URL,
-        CAST(CAST(ps.value_delta AS MONEY) / (DATEDIFF(ss, ps1.SampleTime, ps.SampleTime)) AS NVARCHAR(20)) AS Details,
-        ps.value_delta / (DATEDIFF(ss, ps1.SampleTime, ps.SampleTime)) AS DetailsInt
+        CAST(CAST(ps.value_delta AS MONEY) / NULLIF(DATEDIFF(ss, ps1.SampleTime, ps.SampleTime), 0) AS NVARCHAR(20)) AS Details,
+        ps.value_delta / NULLIF(DATEDIFF(ss, ps1.SampleTime, ps.SampleTime), 0) AS DetailsInt
     FROM #PerfmonStats ps
         INNER JOIN #PerfmonStats ps1 ON ps.object_name = ps1.object_name AND ps.counter_name = ps1.counter_name AND ps1.Pass = 1
     WHERE ps.Pass = 2
@@ -3757,8 +3756,8 @@ If one of them is a lead blocker, consider killing that query.'' AS HowToStopit,
 		    'Server Info' AS FindingGroup,
 		    'SQL Compilations per Sec' AS Finding,
 		    'https://www.brentozar.com/go/measure' AS URL,
-		    CAST(ps.value_delta / (DATEDIFF(ss, ps1.SampleTime, ps.SampleTime)) AS NVARCHAR(20)) AS Details,
-		    ps.value_delta / (DATEDIFF(ss, ps1.SampleTime, ps.SampleTime)) AS DetailsInt
+		    CAST(ps.value_delta / NULLIF(DATEDIFF(ss, ps1.SampleTime, ps.SampleTime), 0) AS NVARCHAR(20)) AS Details,
+		    ps.value_delta / NULLIF(DATEDIFF(ss, ps1.SampleTime, ps.SampleTime), 0) AS DetailsInt
 		FROM #PerfmonStats ps
 		    INNER JOIN #PerfmonStats ps1 ON ps.object_name = ps1.object_name AND ps.counter_name = ps1.counter_name AND ps1.Pass = 1
 		WHERE ps.Pass = 2
@@ -3780,8 +3779,8 @@ If one of them is a lead blocker, consider killing that query.'' AS HowToStopit,
 		    'Server Info' AS FindingGroup,
 		    'SQL Re-Compilations per Sec' AS Finding,
 		    'https://www.brentozar.com/go/measure' AS URL,
-		    CAST(ps.value_delta / (DATEDIFF(ss, ps1.SampleTime, ps.SampleTime)) AS NVARCHAR(20)) AS Details,
-		    ps.value_delta / (DATEDIFF(ss, ps1.SampleTime, ps.SampleTime)) AS DetailsInt
+		    CAST(ps.value_delta / NULLIF(DATEDIFF(ss, ps1.SampleTime, ps.SampleTime), 0) AS NVARCHAR(20)) AS Details,
+		    ps.value_delta / NULLIF(DATEDIFF(ss, ps1.SampleTime, ps.SampleTime), 0) AS DetailsInt
 		FROM #PerfmonStats ps
 		    INNER JOIN #PerfmonStats ps1 ON ps.object_name = ps1.object_name AND ps.counter_name = ps1.counter_name AND ps1.Pass = 1
 		WHERE ps.Pass = 2
@@ -4280,7 +4279,7 @@ If one of them is a lead blocker, consider killing that query.'' AS HowToStopit,
     END;
     ELSE IF (SUBSTRING(@OutputTableName, 2, 1) = '#')
     BEGIN
-        RAISERROR('Due to the nature of Dymamic SQL, only global (i.e. double pound (##)) temp tables are supported for @OutputTableName', 16, 0);
+        RAISERROR('Due to the nature of Dynamic SQL, only global (i.e. double pound (##)) temp tables are supported for @OutputTableName', 16, 0);
     END;
 
     /* @OutputTableNameFileStats lets us export the results to a permanent table */
@@ -4469,7 +4468,7 @@ If one of them is a lead blocker, consider killing that query.'' AS HowToStopit,
     END;
     ELSE IF (SUBSTRING(@OutputTableNameFileStats, 2, 1) = '#')
     BEGIN
-        RAISERROR('Due to the nature of Dymamic SQL, only global (i.e. double pound (##)) temp tables are supported for @OutputTableName', 16, 0);
+        RAISERROR('Due to the nature of Dynamic SQL, only global (i.e. double pound (##)) temp tables are supported for @OutputTableName', 16, 0);
     END;
 
 
@@ -4763,7 +4762,6 @@ If one of them is a lead blocker, consider killing that query.'' AS HowToStopit,
             + ' INSERT '
             + @OutputTableNamePerfmonStats
             + ' (ServerName, CheckDate, object_name, counter_name, instance_name, cntr_value, cntr_type, value_delta, value_per_second) SELECT '
-            + CAST(SERVERPROPERTY('ServerName') AS NVARCHAR(128))
             + ' @SrvName, @CheckDate, object_name, counter_name, instance_name, cntr_value, cntr_type, value_delta, value_per_second FROM #PerfmonStats WHERE Pass = 2';
 
 		EXEC sp_executesql @StringToExecute,
@@ -4772,7 +4770,7 @@ If one of them is a lead blocker, consider killing that query.'' AS HowToStopit,
     END;
     ELSE IF (SUBSTRING(@OutputTableNamePerfmonStats, 2, 1) = '#')
     BEGIN
-        RAISERROR('Due to the nature of Dymamic SQL, only global (i.e. double pound (##)) temp tables are supported for @OutputTableName', 16, 0);
+        RAISERROR('Due to the nature of Dynamic SQL, only global (i.e. double pound (##)) temp tables are supported for @OutputTableName', 16, 0);
     END;
 
 
@@ -4951,7 +4949,7 @@ If one of them is a lead blocker, consider killing that query.'' AS HowToStopit,
     END;
     ELSE IF (SUBSTRING(@OutputTableNameWaitStats, 2, 1) = '#')
     BEGIN
-        RAISERROR('Due to the nature of Dymamic SQL, only global (i.e. double pound (##)) temp tables are supported for @OutputTableName', 16, 0);
+        RAISERROR('Due to the nature of Dynamic SQL, only global (i.e. double pound (##)) temp tables are supported for @OutputTableName', 16, 0);
     END;
 
 
